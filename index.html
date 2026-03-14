@@ -112,17 +112,20 @@
   .card-meta { font-size:11px; color:var(--text-muted); margin-top:7px; }
   .card-icon { position:absolute; top:18px; right:18px; opacity:.15; }
   .content-grid { display:grid; grid-template-columns:1.6fr 1fr; gap:16px; margin-bottom:18px; }
-  .widget { background:rgba(255,255,255,0.04); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid var(--border); border-radius:20px; padding:22px; position:relative; overflow:hidden; }
+  .widget { background:rgba(255,255,255,0.04); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid var(--border); border-radius:20px; padding:22px; position:relative; overflow:visible; }
   .widget::after { content:''; position:absolute; top:0;left:0;right:0;bottom:0; background:linear-gradient(135deg,rgba(255,255,255,.03) 0%,transparent 50%); pointer-events:none; border-radius:20px; }
   .widget-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
   .widget-title { font-size:13.5px; font-weight:600; letter-spacing:-.1px; display:flex; align-items:center; gap:7px; }
   .widget-action { font-size:11.5px; color:var(--accent-lt); cursor:pointer; font-weight:500; transition:opacity .15s; }
   .widget-action:hover { opacity:.7; }
-  .bar-chart { display:flex; align-items:flex-end; gap:6px; height:145px; padding:18px 0 22px; position:relative; overflow:hidden; }
+  .bar-chart { display:flex; align-items:flex-end; gap:6px; height:145px; padding:18px 0 22px; position:relative; overflow:visible; }
   .bar-chart::after { content:''; position:absolute; bottom:22px;left:0;right:0; height:1px; background:rgba(255,255,255,.06); }
-  .bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; height:100%; justify-content:flex-end; }
+  .bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; height:100%; justify-content:flex-end; overflow:visible; }
   .bars { display:flex; gap:3px; align-items:flex-end; width:100%; height:108px; overflow:visible; }
-  .bar { width:100%; border-radius:5px 5px 0 0; transition:height .5s cubic-bezier(.16,1,.3,1),opacity .2s; min-height:2px; max-height:100%; position:relative; }
+  .bar { width:100%; border-radius:5px 5px 0 0; transition:height .5s cubic-bezier(.16,1,.3,1),opacity .2s; min-height:2px; max-height:100%; position:relative; overflow:visible; }
+  .bar-val { position:absolute; bottom:calc(100% + 3px); left:50%; transform:translateX(-50%); font-size:7.5px; white-space:nowrap; font-family:var(--fn-num); font-weight:700; z-index:10; pointer-events:none; }
+  .bar-val-income  { color:var(--accent-lt); }
+  .bar-val-expense { color:var(--red); }
   .bar:hover { opacity:.75; }
   .bar.income-bar  { background:linear-gradient(180deg,var(--pink),var(--accent),var(--accent-dim)); box-shadow:0 0 14px rgba(192,68,250,.35); }
   .bar.expense-bar { background:linear-gradient(180deg,#f87171,rgba(248,113,113,.35)); }
@@ -495,6 +498,7 @@
     /* Bar chart menor */
     .bar-chart { height: 120px; padding: 16px 0 20px; }
     .bar-chart .bars { height: 84px; }
+    .bar-val { font-size: 7px; bottom: calc(100% + 2px); }
   }
 
   @media (max-width: 768px) {
@@ -1341,10 +1345,10 @@ function renderBar() {
     <div class="bar-group">
       <div class="bars">
         <div class="bar income-bar"  style="height:${barH(s.inc)}%" title="Receita: R$ ${s.inc.toLocaleString('pt-BR')}">
-          ${s.inc > 0 ? `<div style="position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:7px;color:var(--accent-lt);white-space:nowrap;margin-bottom:2px;font-family:var(--fn-num);font-weight:700">${fmt(s.inc)}</div>` : ''}
+          ${s.inc > 0 ? `<div class="bar-val bar-val-income">${fmt(s.inc)}</div>` : ''}
         </div>
-        <div class="bar expense-bar" style="height:${barH(s.exp)}%;position:relative" title="Despesa: R$ ${s.exp.toLocaleString('pt-BR')}">
-          ${s.exp > 0 ? `<div style="position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:7px;color:var(--red);white-space:nowrap;margin-bottom:2px;font-family:var(--fn-num);font-weight:700">${fmt(s.exp)}</div>` : ''}
+        <div class="bar expense-bar" style="height:${barH(s.exp)}%" title="Despesa: R$ ${s.exp.toLocaleString('pt-BR')}">
+          ${s.exp > 0 ? `<div class="bar-val bar-val-expense">${fmt(s.exp)}</div>` : ''}
         </div>
       </div>
       <div class="bar-label">${s.label}</div>
