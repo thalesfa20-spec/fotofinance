@@ -1092,6 +1092,28 @@ function renderTx() {
   renderDashboard();
 }
 
+// ── PARSE DE DATA ROBUSTO (aceita YYYY-MM-DD, DD/MM/YYYY, DD/MM/YY) ──
+function parseDate(raw) {
+  if (!raw) return null;
+  raw = raw.trim();
+  // Formato ISO: 2025-03-15
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const d = new Date(raw + 'T12:00:00');
+    return isNaN(d) ? null : d;
+  }
+  // Formato BR: 15/03/2025 ou 15/03/25
+  const parts = raw.split('/');
+  if (parts.length === 3) {
+    let [day, month, year] = parts.map(Number);
+    if (year < 100) year += 2000;
+    const d = new Date(year, month - 1, day, 12, 0, 0);
+    return isNaN(d) ? null : d;
+  }
+  // Fallback
+  const d = new Date(raw);
+  return isNaN(d) ? null : d;
+}
+
 // Calcula e atualiza TODOS os cards do dashboard com filtro de contexto
 function renderDashboard() {
   const now = new Date();
@@ -1100,9 +1122,8 @@ function renderDashboard() {
   // Filtra por contexto E pelo mês atual
   const txCtx = transactions.filter(txFilter);
   const txMonth = txCtx.filter(t => {
-    if (!t.rawDate) return false;
-    const d = new Date(t.rawDate + 'T12:00:00');
-    return !isNaN(d) && d.getMonth() === curM && d.getFullYear() === curY;
+    const d = parseDate(t.rawDate);
+    return d !== null && d.getMonth() === curM && d.getFullYear() === curY;
   });
 
   const income  = txMonth.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount, 0);
@@ -1124,14 +1145,14 @@ function renderDashboard() {
   const prevDate = new Date(curY, curM - 1, 1);
   const pm = prevDate.getMonth(), py = prevDate.getFullYear();
   const prevInc = txCtx.filter(t => {
-    if (!t.rawDate) return false;
-    const d = new Date(t.rawDate + 'T12:00:00');
-    return !isNaN(d) && d.getMonth()===pm && d.getFullYear()===py && t.amount>0;
+    const d = parseDate(t.rawDate);
+    if (!d) return false;
+    return d !== null && d.getMonth()===pm && d.getFullYear()===py && t.amount>0;
   }).reduce((s,t)=>s+t.amount, 0);
   const prevExp = txCtx.filter(t => {
-    if (!t.rawDate) return false;
-    const d = new Date(t.rawDate + 'T12:00:00');
-    return !isNaN(d) && d.getMonth()===pm && d.getFullYear()===py && t.amount<0;
+    const d = parseDate(t.rawDate);
+    if (!d) return false;
+    return d !== null && d.getMonth()===pm && d.getFullYear()===py && t.amount<0;
   }).reduce((s,t)=>s+Math.abs(t.amount), 0);
   const prevLabel = MONTH_LABELS[pm];
 
@@ -1164,9 +1185,9 @@ function renderDonut() {
   // Filtra despesas do mês atual E pelo contexto
   const expenses = transactions.filter(txFilter).filter(t => {
     if (t.amount >= 0) return false;
-    if (!t.rawDate) return false;
-    const d = new Date(t.rawDate + 'T12:00:00');
-    return !isNaN(d) && d.getMonth() === curM && d.getFullYear() === curY;
+    const d = parseDate(t.rawDate);
+    if (!d) return false;
+    return d !== null && d.getMonth() === curM && d.getFullYear() === curY;
   });
   const totalExp = expenses.reduce((s,t) => s + Math.abs(t.amount), 0);
 
@@ -1297,7 +1318,7 @@ function renderBar() {
   // Transações SEM rawDate são ignoradas (não vão parar no mês atual)
   transactions.filter(txFilter).forEach(t => {
     if (!t.rawDate) return; // ignora transações sem data definida
-    const d = new Date(t.rawDate + 'T12:00:00');
+    const d = parseDate(t.rawDate);
     if (isNaN(d.getTime())) return;
     const slot = slots.find(s => s.year === d.getFullYear() && s.month === d.getMonth());
     if (!slot) return;
@@ -2747,15 +2768,33 @@ function initGoogleAuth() {
     },
   });
 
-  // Tenta restaurar sessão da sessionStorage
-  const saved = sessionStorage.getItem('ff_token');
-  const savedUser = sessionStorage.getItem('ff_user');
+  // Tenta restaurar sessão — localStorage primeiro (persiste no iOS), depois sessionStorage
+  const saved     = (()=>{ try{ return localStorage.getItem('ff_token') || sessionStorage.getItem('ff_token'); }catch(e){return null;} })();
+  const savedUser = (()=>{ try{ return localStorage.getItem('ff_user')  || sessionStorage.getItem('ff_user');  }catch(e){return null;} })();
   if (saved && savedUser) {
     gAccessToken = saved;
     gUserProfile = JSON.parse(savedUser);
     updateSidebarUser();
     hideLoginScreen();
-    ensureSheetsExist().then(() => loadFromSheets()).then(scheduleSyncLoop);
+    // Valida token antes de carregar (tokens expiram em 1h)
+    fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers:{ Authorization:'Bearer '+saved } })
+      .then(r => {
+        if (r.ok) {
+          ensureSheetsExist().then(() => loadFromSheets()).then(scheduleSyncLoop);
+        } else {
+          // Token expirado — tenta renovar silenciosamente
+          console.warn('Token expirado, renovando...');
+          try { tokenClient.requestAccessToken({ prompt: '' }); } catch(e) {
+            // Falhou silencioso — mostra login screen novamente
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('login-screen').style.opacity = '1';
+          }
+        }
+      })
+      .catch(() => {
+        // Sem internet — carrega dados em modo offline se possível
+        renderTx(); renderDashboard();
+      });
   }
 }
 
@@ -2776,8 +2815,12 @@ async function fetchUserProfile() {
       headers: { Authorization: 'Bearer ' + gAccessToken }
     });
     gUserProfile = await r.json();
-    sessionStorage.setItem('ff_token', gAccessToken);
-    sessionStorage.setItem('ff_user', JSON.stringify(gUserProfile));
+    // Usa localStorage para persistir entre sessões (sessionStorage some no iOS Safari)
+    try { localStorage.setItem('ff_token', gAccessToken); } catch(e) {}
+    try { localStorage.setItem('ff_user', JSON.stringify(gUserProfile)); } catch(e) {}
+    // Mantém sessionStorage como fallback secundário
+    try { sessionStorage.setItem('ff_token', gAccessToken); } catch(e) {}
+    try { sessionStorage.setItem('ff_user', JSON.stringify(gUserProfile)); } catch(e) {}
     updateSidebarUser();
   } catch(e) { console.warn('fetchUserProfile', e); }
 }
@@ -2802,8 +2845,8 @@ function updateSidebarUser() {
 function showUserMenu() {
   if (!gUserProfile) return;
   if (confirm(`Sair da conta ${gUserProfile.email}?`)) {
-    sessionStorage.removeItem('ff_token');
-    sessionStorage.removeItem('ff_user');
+    try { sessionStorage.removeItem('ff_token'); sessionStorage.removeItem('ff_user'); } catch(e) {}
+    try { localStorage.removeItem('ff_token');   localStorage.removeItem('ff_user');   } catch(e) {}
     gAccessToken = null; gUserProfile = null;
     location.reload();
   }
