@@ -2803,7 +2803,8 @@ function initGoogleAuth() {
         }
       })
       .catch(() => {
-        // Sem internet — carrega dados em modo offline se possível
+        // Sem internet — renderiza o que tiver em memória
+        dataWasLoaded = true;
         renderTx(); renderDashboard();
       });
   }
@@ -3033,6 +3034,7 @@ async function loadFromSheets() {
     }
 
     renderTx(); renderDashboard(); renderGoals(); renderMetasPage();
+    dataWasLoaded = true; // dados carregados com sucesso — agora pode salvar
     setSyncStatus('ok');
     showSyncToast('✓ Dados carregados com sucesso');
   } catch(e) {
@@ -3043,8 +3045,17 @@ async function loadFromSheets() {
 }
 
 // ── SALVAR TUDO NA PLANILHA ──
+let dataWasLoaded = false; // flag: só salva se os dados foram carregados primeiro
+let syncLoopActive = false; // flag: evita scheduleSyncLoop duplicado
+
 async function saveToSheets() {
   if (!gAccessToken) return;
+  // PROTEÇÃO CRÍTICA: nunca salva se os dados ainda não foram carregados
+  // Evita sobrescrever a planilha com arrays vazios durante a inicialização
+  if (!dataWasLoaded) {
+    console.warn('saveToSheets bloqueado: dados ainda não foram carregados.');
+    return;
+  }
   setSyncStatus('syncing');
   try {
     // Transações
@@ -3061,7 +3072,6 @@ async function saveToSheets() {
       const status = card.dataset.status||'';
       const total = card.dataset.total||0;
       const sinal = card.dataset.sinal||0;
-      const dataEl = card.querySelector('.client-type')?.textContent?.split('·')[1]?.trim()||'';
       cliValues.push([i+1, nome, tipo, status, total, sinal, '', '']);
     });
 
@@ -3090,10 +3100,8 @@ async function saveToSheets() {
       metaValues.push([i+1, nome, desc, icon, curr, tot, mode, '']);
     });
 
-    // Limpa e reescreve cada aba
-    const clearRanges = [`${SHEET_TX}!A:I`, `${SHEET_CLI}!A:H`, `${SHEET_ORC}!A:H`, `${SHEET_METAS}!A:H`];
-    await sheetsRequest(`${SHEETS_API}/${SPREADSHEET_ID}/values:batchClear`, 'POST', { ranges: clearRanges });
-
+    // CORREÇÃO: usa batchUpdate direto sem batchClear antes
+    // Isso é atômico — se falhar, os dados antigos continuam intactos na planilha
     await sheetsRequest(`${SHEETS_API}/${SPREADSHEET_ID}/values:batchUpdate`, 'POST', {
       valueInputOption: 'RAW',
       data: [
@@ -3115,7 +3123,10 @@ async function saveToSheets() {
 
 // ── SYNC AUTOMÁTICO ──
 function scheduleSyncLoop() {
-  // Salva sempre que houver mudanças, com debounce de 3s
+  // CORREÇÃO: evita criar wrappers duplicados se chamado mais de uma vez
+  if (syncLoopActive) return;
+  syncLoopActive = true;
+
   const origSaveTx2       = window.saveTx;
   const origSaveOrc2      = window.saveOrc;
   const origSaveCliente2  = window.saveCliente;
@@ -3125,18 +3136,23 @@ function scheduleSyncLoop() {
 
   function scheduleSync() {
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(() => { if (gAccessToken) saveToSheets(); }, 3000);
+    syncTimer = setTimeout(() => { if (gAccessToken && dataWasLoaded) saveToSheets(); }, 3000);
   }
 
-  window.saveTx = function() { origSaveTx2.apply(this,arguments); scheduleSync(); };
-  window.saveOrc = function() { origSaveOrc2.apply(this,arguments); scheduleSync(); };
+  window.saveTx      = function() { origSaveTx2.apply(this,arguments);      scheduleSync(); };
+  window.saveOrc     = function() { origSaveOrc2.apply(this,arguments);     scheduleSync(); };
   window.saveCliente = function() { origSaveCliente2.apply(this,arguments); scheduleSync(); };
-  window.saveMeta = function() { origSaveMeta2.apply(this,arguments); scheduleSync(); };
-  window.saveDetail = function() { origSaveDetail2.apply(this,arguments); scheduleSync(); };
-  window.doDelete = function() { origDoDelete2.apply(this,arguments); scheduleSync(); };
+  window.saveMeta    = function() { origSaveMeta2.apply(this,arguments);    scheduleSync(); };
+  window.saveDetail  = function() { origSaveDetail2.apply(this,arguments);  scheduleSync(); };
+  window.doDelete    = function() { origDoDelete2.apply(this,arguments);    scheduleSync(); };
 
-  // Também salva quando fecha a aba
-  window.addEventListener('beforeunload', () => { if (gAccessToken) saveToSheets(); });
+  // CORREÇÃO: beforeunload só salva se os dados foram carregados E houve alterações pendentes
+  window.addEventListener('beforeunload', () => {
+    if (gAccessToken && dataWasLoaded && syncTimer) {
+      clearTimeout(syncTimer);
+      saveToSheets();
+    }
+  });
 }
 </script>
 </body>
