@@ -118,11 +118,11 @@
   .widget-title { font-size:13.5px; font-weight:600; letter-spacing:-.1px; display:flex; align-items:center; gap:7px; }
   .widget-action { font-size:11.5px; color:var(--accent-lt); cursor:pointer; font-weight:500; transition:opacity .15s; }
   .widget-action:hover { opacity:.7; }
-  .bar-chart { display:flex; align-items:flex-end; gap:6px; height:130px; padding-bottom:22px; position:relative; }
+  .bar-chart { display:flex; align-items:flex-end; gap:6px; height:145px; padding:18px 0 22px; position:relative; overflow:hidden; }
   .bar-chart::after { content:''; position:absolute; bottom:22px;left:0;right:0; height:1px; background:rgba(255,255,255,.06); }
   .bar-group { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; height:100%; justify-content:flex-end; }
-  .bars { display:flex; gap:3px; align-items:flex-end; width:100%; height:108px; }
-  .bar { width:100%; border-radius:5px 5px 0 0; transition:height .5s cubic-bezier(.16,1,.3,1),opacity .2s; min-height:2px; }
+  .bars { display:flex; gap:3px; align-items:flex-end; width:100%; height:108px; overflow:visible; }
+  .bar { width:100%; border-radius:5px 5px 0 0; transition:height .5s cubic-bezier(.16,1,.3,1),opacity .2s; min-height:2px; max-height:100%; position:relative; }
   .bar:hover { opacity:.75; }
   .bar.income-bar  { background:linear-gradient(180deg,var(--pink),var(--accent),var(--accent-dim)); box-shadow:0 0 14px rgba(192,68,250,.35); }
   .bar.expense-bar { background:linear-gradient(180deg,#f87171,rgba(248,113,113,.35)); }
@@ -481,7 +481,8 @@
     .dash-goals-grid { grid-template-columns: 1fr 1fr; }
 
     /* Modal */
-    .modal { width: 96vw; padding: 22px 18px; border-radius: 18px; }
+    .modal { width: 96vw; padding: 22px 18px; border-radius: 18px; max-height: 80vh; }
+    .modal-overlay { align-items: flex-start; padding-top: 12px; overflow-y: auto; }
     .detail-modal { width: 96vw; }
     .form-row { grid-template-columns: 1fr; }
     .detail-grid { grid-template-columns: 1fr 1fr; }
@@ -492,7 +493,8 @@
     }
 
     /* Bar chart menor */
-    .bar-chart { height: 100px; }
+    .bar-chart { height: 120px; padding: 16px 0 20px; }
+    .bar-chart .bars { height: 84px; }
   }
 
   @media (max-width: 768px) {
@@ -1092,17 +1094,34 @@ function renderTx() {
 
 // Calcula e atualiza TODOS os cards do dashboard com filtro de contexto
 function renderDashboard() {
-  const txCtx = transactions.filter(txFilter);
+  const now = new Date();
+  const curM = now.getMonth(), curY = now.getFullYear();
 
-  const income  = txCtx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount, 0);
-  const expense = txCtx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount), 0);
+  // Filtra por contexto E pelo mês atual
+  const txCtx = transactions.filter(txFilter);
+  const txMonth = txCtx.filter(t => {
+    if (!t.rawDate) return false;
+    const d = new Date(t.rawDate + 'T12:00:00');
+    return !isNaN(d) && d.getMonth() === curM && d.getFullYear() === curY;
+  });
+
+  const income  = txMonth.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount, 0);
+  const expense = txMonth.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount), 0);
+  const balance = income - expense;
 
   document.getElementById('dash-income').textContent  = 'R$ ' + income.toLocaleString('pt-BR');
   document.getElementById('dash-expense').textContent = 'R$ ' + expense.toLocaleString('pt-BR');
-  document.getElementById('dash-balance').textContent = 'R$ ' + (income - expense).toLocaleString('pt-BR');
+  document.getElementById('dash-balance').textContent = 'R$ ' + balance.toLocaleString('pt-BR');
+
+  // Cor dinâmica do saldo
+  const balanceEl = document.getElementById('dash-balance');
+  balanceEl.className = 'card-value ' + (balance >= 0 ? 'positive' : 'negative');
+  // Meta do card de saldo
+  const balanceMeta = document.querySelector('#page-dashboard .summary-card.balance .card-meta');
+  if (balanceMeta) balanceMeta.textContent = balance >= 0 ? 'Lucro do mês' : 'Prejuízo do mês';
 
   // Variação vs mês anterior
-  const prevDate = new Date(); prevDate.setMonth(prevDate.getMonth() - 1);
+  const prevDate = new Date(curY, curM - 1, 1);
   const pm = prevDate.getMonth(), py = prevDate.getFullYear();
   const prevInc = txCtx.filter(t => {
     if (!t.rawDate) return false;
@@ -1134,12 +1153,21 @@ function renderDashboard() {
   renderGoals();
 }
 
-// ── DONUT CHART (gastos por categoria, dinâmico) ──
+// ── DONUT CHART (gastos por categoria do mês atual) ──
 const DONUT_COLORS = ['#c084fc','#ec4899','#22d3ee','#7c3aed','#4ade80','#f0abfc'];
 const CIRC = 2 * Math.PI * 34; // circunferência r=34
 
 function renderDonut() {
-  const expenses = transactions.filter(txFilter).filter(t => t.amount < 0);
+  const now = new Date();
+  const curM = now.getMonth(), curY = now.getFullYear();
+
+  // Filtra despesas do mês atual E pelo contexto
+  const expenses = transactions.filter(txFilter).filter(t => {
+    if (t.amount >= 0) return false;
+    if (!t.rawDate) return false;
+    const d = new Date(t.rawDate + 'T12:00:00');
+    return !isNaN(d) && d.getMonth() === curM && d.getFullYear() === curY;
+  });
   const totalExp = expenses.reduce((s,t) => s + Math.abs(t.amount), 0);
 
   // agrupa por categoria
@@ -1182,6 +1210,26 @@ function renderDonut() {
       <span class="donut-amount">R$ ${val.toLocaleString('pt-BR')}</span>
     </div>`;
   });
+
+  // Adiciona total no centro do donut
+  const existingText = svg.querySelector('.donut-center-text');
+  if (existingText) existingText.remove();
+  const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.setAttribute('class','donut-center-text');
+  const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+  label.setAttribute('x','44'); label.setAttribute('y','40');
+  label.setAttribute('text-anchor','middle'); label.setAttribute('font-size','7');
+  label.setAttribute('fill','rgba(255,255,255,0.45)'); label.setAttribute('font-family','Plus Jakarta Sans,sans-serif');
+  label.textContent = 'Total';
+  const amount = document.createElementNS('http://www.w3.org/2000/svg','text');
+  amount.setAttribute('x','44'); amount.setAttribute('y','50');
+  amount.setAttribute('text-anchor','middle'); amount.setAttribute('font-size','8.5');
+  amount.setAttribute('fill','#ffffff'); amount.setAttribute('font-family','Plus Jakarta Sans,sans-serif');
+  amount.setAttribute('font-weight','700');
+  const k = totalExp >= 1000 ? (totalExp/1000).toFixed(1).replace('.',',')+'k' : totalExp.toLocaleString('pt-BR');
+  amount.textContent = 'R$'+k;
+  g.appendChild(label); g.appendChild(amount);
+  svg.appendChild(g);
 }
 
 // ── A RECEBER ──
@@ -1246,24 +1294,30 @@ function renderBar() {
   }
 
   // Agrupa transações nos slots (filtrado por contexto)
+  // Transações SEM rawDate são ignoradas (não vão parar no mês atual)
   transactions.filter(txFilter).forEach(t => {
-    let year = now.getFullYear(), month = now.getMonth();
-    if (t.rawDate) {
-      const d = new Date(t.rawDate + 'T12:00:00');
-      if (!isNaN(d.getTime())) { year = d.getFullYear(); month = d.getMonth(); }
-    }
-    const slot = slots.find(s => s.year === year && s.month === month);
+    if (!t.rawDate) return; // ignora transações sem data definida
+    const d = new Date(t.rawDate + 'T12:00:00');
+    if (isNaN(d.getTime())) return;
+    const slot = slots.find(s => s.year === d.getFullYear() && s.month === d.getMonth());
     if (!slot) return;
     if (t.amount > 0) slot.inc += t.amount;
     else slot.exp += Math.abs(t.amount);
   });
 
   const maxV = Math.max(...slots.map(s => Math.max(s.inc, s.exp)), 1);
+  const barH = (v) => Math.min(98, Math.round((v / maxV) * 100));
+  const fmt  = (v) => v >= 1000 ? 'R$'+(v/1000).toFixed(1).replace('.',',')+'k' : v > 0 ? 'R$'+v.toLocaleString('pt-BR') : '';
+
   document.getElementById('barChart').innerHTML = slots.map(s => `
     <div class="bar-group">
       <div class="bars">
-        <div class="bar income-bar"  style="height:${(s.inc/maxV)*100}%" title="Receita: R$ ${s.inc.toLocaleString('pt-BR')}"></div>
-        <div class="bar expense-bar" style="height:${(s.exp/maxV)*100}%" title="Despesa: R$ ${s.exp.toLocaleString('pt-BR')}"></div>
+        <div class="bar income-bar"  style="height:${barH(s.inc)}%" title="Receita: R$ ${s.inc.toLocaleString('pt-BR')}">
+          ${s.inc > 0 ? `<div style="position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:7px;color:var(--accent-lt);white-space:nowrap;margin-bottom:2px;font-family:var(--fn-num);font-weight:700">${fmt(s.inc)}</div>` : ''}
+        </div>
+        <div class="bar expense-bar" style="height:${barH(s.exp)}%;position:relative" title="Despesa: R$ ${s.exp.toLocaleString('pt-BR')}">
+          ${s.exp > 0 ? `<div style="position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:7px;color:var(--red);white-space:nowrap;margin-bottom:2px;font-family:var(--fn-num);font-weight:700">${fmt(s.exp)}</div>` : ''}
+        </div>
       </div>
       <div class="bar-label">${s.label}</div>
     </div>`).join('');
@@ -1274,8 +1328,16 @@ let currentContext = 'geral'; // 'geral' | 'profissional' | 'pessoal'
 
 function setContext(ctx, el) {
   currentContext = ctx;
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  // Remove active de todos os botões de contexto (sidebar + mobile), sem afetar nav-items
+  document.querySelectorAll('.mode-toggle .mode-btn, #mobile-ctx .mode-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
+  // Sincroniza o botão equivalente (sidebar↔mobile)
+  const pairMap = {
+    'ctx-geral':'ctx-geral-m','ctx-profissional':'ctx-profissional-m','ctx-pessoal':'ctx-pessoal-m',
+    'ctx-geral-m':'ctx-geral','ctx-profissional-m':'ctx-profissional','ctx-pessoal-m':'ctx-pessoal'
+  };
+  const pair = pairMap[el.id];
+  if (pair) document.getElementById(pair)?.classList.add('active');
   // update badge
   const badge = document.getElementById('dash-ctx-badge');
   if (badge) badge.textContent = ctx === 'geral' ? '· Visão Geral' : ctx === 'profissional' ? '· Profissional' : '· Pessoal';
@@ -1511,8 +1573,14 @@ function doDelete() {
     renderTx();
   } else if(pendingDelete.type === 'card') {
     const cardToRemove = pendingDelete.card;
+    // Se o card tem uma transação vinculada (clientes), remove também
+    const linkedTxId = parseInt(cardToRemove.dataset.txId);
+    if (linkedTxId) {
+      const txIdx = transactions.findIndex(t => t.id === linkedTxId);
+      if (txIdx > -1) transactions.splice(txIdx, 1);
+    }
     cardToRemove.style.animation = 'fadeIn .2s ease reverse';
-    setTimeout(()=> { cardToRemove.remove(); renderDashboard(); renderGoals(); renderMetasPage(); }, 180);
+    setTimeout(()=> { cardToRemove.remove(); renderTx(); renderDashboard(); renderGoals(); renderMetasPage(); }, 180);
   }
   document.getElementById('confirm-overlay').classList.remove('open');
   pendingDelete = null;
@@ -1521,8 +1589,10 @@ function doDelete() {
 
 // ── SAVE TRANSAÇÃO ──
 function saveTx(){
-  const desc  = document.getElementById('tx-desc').value || 'Nova transação';
+  const desc  = document.getElementById('tx-desc').value.trim();
   const valor = parseFloat(document.getElementById('tx-valor').value)||0;
+  if (!desc) { document.getElementById('tx-desc').focus(); document.getElementById('tx-desc').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('tx-desc').style.borderColor='',2000); return; }
+  if (valor <= 0) { document.getElementById('tx-valor').focus(); document.getElementById('tx-valor').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('tx-valor').style.borderColor='',2000); return; }
   const isInc = document.getElementById('tx-tipo').value.includes('Receita');
   const mode  = document.getElementById('tx-conta').value.includes('Prof') || document.getElementById('tx-conta').value === 'prof' ? 'prof' : 'pes';
   const cat   = document.getElementById('tx-cat').value.replace(/^\S+\s/,'').trim();
@@ -1610,8 +1680,8 @@ function buildOrcCard(cliente, tipo, status, valor, data, desc, photo) {
     <div class="orc-type">${icon}</div>
     <div class="orc-info">
       <div class="orc-name">${cliente}</div>
-      <div class="orc-meta">${desc} · ${dataFmt}</div>
-      ${hasPhoto ? '<div style="font-size:10px;color:var(--cyan);margin-top:3px"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#e879f9\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg> Anexo</div>' : ''}
+      <div class="orc-meta">${desc ? desc.substring(0,40)+(desc.length>40?'…':'') + ' · ' : ''}${dataFmt}</div>
+      ${hasPhoto ? '<div style="font-size:10px;color:var(--cyan);margin-top:3px;display:flex;align-items:center;gap:3px"><svg viewBox="0 0 24 24" fill="none" stroke="#e879f9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> Anexo</div>' : ''}
     </div>
     <div class="orc-amount">
       <div class="orc-value">R$ ${valor.toLocaleString('pt-BR')}</div>
@@ -1622,10 +1692,12 @@ function buildOrcCard(cliente, tipo, status, valor, data, desc, photo) {
 }
 
 function saveOrc(){
-  const cliente = document.getElementById('orc-cliente').value || 'Novo orçamento';
+  const cliente = document.getElementById('orc-cliente').value.trim();
+  const valor   = parseFloat(document.getElementById('orc-valor').value) || 0;
+  if (!cliente) { document.getElementById('orc-cliente').focus(); document.getElementById('orc-cliente').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('orc-cliente').style.borderColor='',2000); return; }
+  if (valor <= 0) { document.getElementById('orc-valor').focus(); document.getElementById('orc-valor').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('orc-valor').style.borderColor='',2000); return; }
   const tipo    = document.getElementById('orc-tipo').value;
   const status  = document.getElementById('orc-status').value;
-  const valor   = parseFloat(document.getElementById('orc-valor').value) || 0;
   const data    = document.getElementById('orc-data').value;
   const desc    = document.getElementById('orc-desc').value || '';
   const card = buildOrcCard(cliente, tipo, status, valor, data, desc, orcPhotoData);
@@ -1649,7 +1721,8 @@ function calcCliPago() {
 
 function saveCliente(){
   // 1. Captura todos os valores ANTES de qualquer alteração no DOM
-  const nome      = document.getElementById('cli-nome').value || 'Novo cliente';
+  const nome      = document.getElementById('cli-nome').value.trim();
+  if (!nome) { document.getElementById('cli-nome').focus(); document.getElementById('cli-nome').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('cli-nome').style.borderColor='',2000); return; }
   const tipo      = document.getElementById('cli-tipo').value;
   const status    = document.getElementById('cli-status').value;
   const statusIdx = document.getElementById('cli-status').selectedIndex;
@@ -1689,19 +1762,19 @@ function saveCliente(){
       <div><div class="client-stat-label">A receber</div><div class="client-stat-value" style="color:var(--cyan)" data-remaining>R$ ${remaining.toLocaleString('pt-BR')}</div></div>
     </div>
     <div class="client-status ${stClass[status]||'status-pending'}">${status}</div>
-    ${photo ? '<div style="font-size:10px;color:var(--cyan);margin-top:6px"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#e879f9\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg> Anexo</div>' : ''}`;
+    ${photo ? '<div style="font-size:10px;color:var(--cyan);margin-top:6px;display:flex;align-items:center;gap:3px"><svg viewBox="0 0 24 24" fill="none" stroke="#e879f9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> Anexo</div>' : ''}`;
   document.getElementById('clients-grid').appendChild(card);
 
   // 3. Cria transação automática se houve pagamento e vincula ao card pelo txId
   if (statusIdx === 1 && sinal > 0) {
     const txId = nextId++;
     card.dataset.txId = txId;
-    transactions.unshift({id:txId, icon:'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#22c55e\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)\"><line x1=\"12\" y1=\"1\" x2=\"12\" y2=\"23\"/><path d=\"M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6\"/></svg>', name:'Sinal — '+nome, cat:'Trabalho foto',
+    transactions.unshift({id:txId, icon:'<svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>', name:'Sinal — '+nome, cat:'Trabalho foto',
       date:dateStr, rawDate:data, amount:sinal, type:'income', mode:'prof', notes:'Sinal recebido via cliente', photo:null});
   } else if (statusIdx === 2 && valor > 0) {
     const txId = nextId++;
     card.dataset.txId = txId;
-    transactions.unshift({id:txId, icon:'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#22c55e\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)\"><line x1=\"12\" y1=\"1\" x2=\"12\" y2=\"23\"/><path d=\"M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6\"/></svg>', name:'Pagamento — '+nome, cat:'Trabalho foto',
+    transactions.unshift({id:txId, icon:'<svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>', name:'Pagamento — '+nome, cat:'Trabalho foto',
       date:dateStr, rawDate:data, amount:valor, type:'income', mode:'prof', notes:'Pagamento total via cliente', photo:null});
   }
 
@@ -1904,10 +1977,12 @@ function resetMetaPhotoUI() {
 // ── SAVE META ──
 const metaIcons={'📷 Câmera/Lente':'📷','✈️ Viagem':'✈️','🏠 Imóvel':'🏠','🎯 Faturamento':'🎯','💻 Tecnologia':'💻','🎓 Educação':'🎓','💰 Reserva':'💰','🚗 Veículo':'🚗','🏋️ Saúde':'🏋️','🎬 Lazer':'🎬','🏢 Estúdio':'🏢','📦 Equipamento':'📦'};
 function saveMeta(){
-  const nome=document.getElementById('meta-nome').value||'Nova meta';
+  const nome=document.getElementById('meta-nome').value.trim();
+  const total=parseFloat(document.getElementById('meta-total').value)||0;
+  if (!nome) { document.getElementById('meta-nome').focus(); document.getElementById('meta-nome').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('meta-nome').style.borderColor='',2000); return; }
+  if (total <= 0) { document.getElementById('meta-total').focus(); document.getElementById('meta-total').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('meta-total').style.borderColor='',2000); return; }
   const desc=document.getElementById('meta-desc').value||'';
   const atual=parseFloat(document.getElementById('meta-atual').value)||0;
-  const total=parseFloat(document.getElementById('meta-total').value)||1;
   const icon=metaIcons[document.getElementById('meta-icon').value]||'🎯';
   const pct=Math.min(100,Math.round((atual/total)*100));
   const contaVal = document.getElementById('meta-conta').value;
@@ -1917,7 +1992,7 @@ function saveMeta(){
   card.dataset.mode = mode;
   card.dataset.photo = photo || '';
   card.setAttribute('onclick','openPreviewMeta(this)');
-  card.innerHTML=`<div class="item-delete" onclick="confirmDelete(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div><div class="goal-header"><div class="goal-icon">${icon}</div><div class="goal-pct">${pct}%</div></div><div class="goal-name">${nome}</div><div class="goal-desc">${desc}</div><div class="goal-bar"><div class="goal-fill" style="width:${pct}%"></div></div><div class="goal-values"><span class="goal-current">R$ ${atual.toLocaleString('pt-BR')} guardados</span><span>Meta: R$ ${total.toLocaleString('pt-BR')}</span></div>${photo?'<div style="font-size:10px;color:var(--cyan);margin-top:6px"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#e879f9\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg> Anexo</div>':''}`;
+  card.innerHTML=`<div class="item-delete" onclick="event.stopPropagation();confirmDelete(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div><div class="goal-header"><div class="goal-icon">${icon}</div><div class="goal-pct">${pct}%</div></div><div class="goal-name">${nome}</div><div class="goal-desc">${desc}</div><div class="goal-bar"><div class="goal-fill" style="width:${pct}%"></div></div><div class="goal-values"><span class="goal-current">R$ ${atual.toLocaleString('pt-BR')} guardados</span><span>Meta: R$ ${total.toLocaleString('pt-BR')}</span></div>${photo?'<div style="font-size:10px;color:var(--cyan);margin-top:6px;display:flex;align-items:center;gap:3px"><svg viewBox="0 0 24 24" fill="none" stroke="#e879f9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> Anexo</div>':''}`;
   const targetGrid = mode === 'prof' ? 'goals-grid-prof' : 'goals-grid-pes';
   document.getElementById(targetGrid).appendChild(card);
   applyGoalColor(card);
@@ -2097,10 +2172,11 @@ function openEditMeta(card) {
 
 function saveEditMeta() {
   if (!currentMetaCard) return saveMeta();
-  const nome  = document.getElementById('meta-nome').value || 'Meta';
+  const nome  = document.getElementById('meta-nome').value.trim() || 'Meta';
+  const total = parseFloat(document.getElementById('meta-total').value) || 0;
+  if (total <= 0) { document.getElementById('meta-total').focus(); document.getElementById('meta-total').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('meta-total').style.borderColor='',2000); return; }
   const desc  = document.getElementById('meta-desc').value || '';
   const atual = parseFloat(document.getElementById('meta-atual').value) || 0;
-  const total = parseFloat(document.getElementById('meta-total').value) || 1;
   const icon  = metaIcons[document.getElementById('meta-icon').value] || '🎯';
   const pct   = Math.min(100, Math.round((atual/total)*100));
   const contaVal = document.getElementById('meta-conta').value;
@@ -2347,7 +2423,7 @@ function saveEditCliente() {
       // Cria nova transação de sinal
       const newId = nextId++;
       currentCliCard.dataset.txId = newId;
-      transactions.unshift({id:newId, icon:'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#22c55e\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)\"><line x1=\"12\" y1=\"1\" x2=\"12\" y2=\"23\"/><path d=\"M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6\"/></svg>', name:'Sinal — '+nome, cat:'Trabalho foto',
+      transactions.unshift({id:newId, icon:'<svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>', name:'Sinal — '+nome, cat:'Trabalho foto',
         date:dateStr, rawDate:data, amount:sinal, type:'income', mode:'prof', notes:'Sinal recebido via cliente', photo:null});
     }
     renderTx();
@@ -2365,7 +2441,7 @@ function saveEditCliente() {
       currentCliCard.dataset.txId = newId;
       const restante = valor - prevSinal;
       const valorTx  = restante > 0 ? restante : valor;
-      transactions.unshift({id:newId, icon:'<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#22c55e\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)\"><line x1=\"12\" y1=\"1\" x2=\"12\" y2=\"23\"/><path d=\"M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6\"/></svg>', name:'Pagamento — '+nome, cat:'Trabalho foto',
+      transactions.unshift({id:newId, icon:'<svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;filter:drop-shadow(0 0 4px #22c55e)"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>', name:'Pagamento — '+nome, cat:'Trabalho foto',
         date:dateStr, rawDate:data, amount:valorTx, type:'income', mode:'prof', notes:'Pagamento final via cliente', photo:null});
     }
     renderTx();
@@ -2617,12 +2693,11 @@ function syncMobileCtx(el) {
   // Sincroniza o estado ativo dos botões mobile com os da sidebar
   document.querySelectorAll('#mobile-ctx .mode-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  // Também atualiza sidebar desktop
+  // Também atualiza sidebar desktop (apenas os botões da sidebar, não o mobile)
   const map = {'ctx-geral-m':'ctx-geral','ctx-profissional-m':'ctx-profissional','ctx-pessoal-m':'ctx-pessoal'};
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.mode-toggle .mode-btn').forEach(b => b.classList.remove('active'));
   const sidebarId = map[el.id];
   if (sidebarId) document.getElementById(sidebarId)?.classList.add('active');
-  el.classList.add('active');
 }
 
 // Init now
@@ -2891,11 +2966,12 @@ async function loadFromSheets() {
         const pct=Math.min(100,Math.round((atual/total)*100));
         const card=document.createElement('div'); card.className='goal-card'; card.dataset.mode=mode; card.dataset.photo=photo;
         card.setAttribute('onclick','openPreviewMeta(this)');
-        card.innerHTML=`<div class="item-delete" onclick="confirmDelete(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>
+        card.innerHTML=`<div class="item-delete" onclick="event.stopPropagation();confirmDelete(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>
         <div class="goal-header"><div class="goal-icon">${icon}</div><div class="goal-pct">${pct}%</div></div>
         <div class="goal-name">${nome}</div><div class="goal-desc">${desc}</div>
         <div class="goal-bar"><div class="goal-fill" style="width:${pct}%"></div></div>
-        <div class="goal-values"><span class="goal-current">R$ ${atual.toLocaleString('pt-BR')} guardados</span><span>Meta: R$ ${total.toLocaleString('pt-BR')}</span></div>`;
+        <div class="goal-values"><span class="goal-current">R$ ${atual.toLocaleString('pt-BR')} guardados</span><span>Meta: R$ ${total.toLocaleString('pt-BR')}</span></div>
+        ${photo ? '<div style="font-size:10px;color:var(--cyan);margin-top:6px;display:flex;align-items:center;gap:3px"><svg viewBox="0 0 24 24" fill="none" stroke="#e879f9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;filter:drop-shadow(0 0 3px #e879f9)"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg> Anexo</div>' : ''}`;
         const tg=mode==='pes'?gridPes:gridProf;
         if(tg) tg.appendChild(card);
         applyGoalColor(card);
