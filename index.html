@@ -1120,8 +1120,10 @@ function renderDashboard() {
   const curM = now.getMonth(), curY = now.getFullYear();
 
   // Filtra por contexto E pelo mês atual
+  // Transações sem data são consideradas do mês atual (foram salvas como "Hoje")
   const txCtx = transactions.filter(txFilter);
   const txMonth = txCtx.filter(t => {
+    if (!t.rawDate) return true; // sem data = hoje = mês atual
     const d = parseDate(t.rawDate);
     return d !== null && d.getMonth() === curM && d.getFullYear() === curY;
   });
@@ -1183,10 +1185,11 @@ function renderDonut() {
   const curM = now.getMonth(), curY = now.getFullYear();
 
   // Filtra despesas do mês atual E pelo contexto
+  // Transações sem data = mês atual
   const expenses = transactions.filter(txFilter).filter(t => {
     if (t.amount >= 0) return false;
+    if (!t.rawDate) return true; // sem data = hoje = mês atual
     const d = parseDate(t.rawDate);
-    if (!d) return false;
     return d !== null && d.getMonth() === curM && d.getFullYear() === curY;
   });
   const totalExp = expenses.reduce((s,t) => s + Math.abs(t.amount), 0);
@@ -1315,12 +1318,16 @@ function renderBar() {
   }
 
   // Agrupa transações nos slots (filtrado por contexto)
-  // Transações SEM rawDate são ignoradas (não vão parar no mês atual)
+  // Transações SEM rawDate vão para o mês atual no gráfico
   transactions.filter(txFilter).forEach(t => {
-    if (!t.rawDate) return; // ignora transações sem data definida
-    const d = parseDate(t.rawDate);
-    if (isNaN(d.getTime())) return;
-    const slot = slots.find(s => s.year === d.getFullYear() && s.month === d.getMonth());
+    let year = now.getFullYear(), month = now.getMonth();
+    if (t.rawDate) {
+      const d = parseDate(t.rawDate);
+      if (!d) return; // data inválida, ignora
+      year = d.getFullYear();
+      month = d.getMonth();
+    }
+    const slot = slots.find(s => s.year === year && s.month === month);
     if (!slot) return;
     if (t.amount > 0) slot.inc += t.amount;
     else slot.exp += Math.abs(t.amount);
